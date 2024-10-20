@@ -15,8 +15,8 @@ fn hello() -> ! {
 
 unsafe fn gt_switch(new: *const ThreadContext) {
     asm!(
-        "mov rsp, [{0} + 0x00]", 
-        "ret", 
+        "mov rsp, [{0} + 0x00]",
+        "ret",
         in(reg) new,
     )
 }
@@ -27,8 +27,14 @@ fn main() {
 
     unsafe {
         let stack_bottom = stack.as_mut_ptr().offset(SSIZE);
+
+        // Round our memory address to nearest 16 byte aligned address
         let sb_aligned = (stack_bottom as usize & !15) as *mut u8;
+
+        // Write the address of the function we want to call to the stack
+        // Cat to a u64 to avoid a default u8, otherwise we will write to write only to position 32.
         std::ptr::write(sb_aligned.offset(-16) as *mut u64, hello as u64);
+
         ctx.rsp = sb_aligned.offset(-16) as u64;
         gt_switch(&mut ctx);
     }
