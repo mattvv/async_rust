@@ -15,15 +15,15 @@ static mut RUNTIME: usize = 0;
 
 pub struct Runtime {
     threads: Vec<Thread>,
-    current: usize
+    current: usize,
 }
 
 // State s athread can be in
 #[derive(PartialEq, Eq, Debug)]
 enum State {
     Available, // Thread available and ready to be assigned a task
-    Running, // Thread is running
-    Ready // Ready to move forward and resume execution
+    Running,   // Thread is running
+    Ready,     // Ready to move forward and resume execution
 }
 
 // Hold all data for a thread.
@@ -44,7 +44,7 @@ struct ThreadContext {
     r13: u64,
     r12: u64,
     rbx: u64,
-    rbp: u64
+    rbp: u64,
 }
 
 impl Thread {
@@ -52,7 +52,7 @@ impl Thread {
         Thread {
             stack: vec![0_u8: DEFAULT_STACK_SIZE], //Allocate new stack on thread creation (not most efficient)
             ctx: ThreadContext::default(),
-            state: State::Available
+            state: State::Available,
         }
     }
 }
@@ -63,7 +63,7 @@ impl Runtime {
         let base_thread = Thread {
             stack: vec![0_u8: DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
-            state: State::Running
+            state: State::Running,
         };
 
         //we now ahve one thread on the runtime scheduler
@@ -75,7 +75,7 @@ impl Runtime {
 
         Runtime {
             threads,
-            current: 0 //runtime thread
+            current: 0, //runtime thread
         }
     }
 
@@ -102,6 +102,39 @@ impl Runtime {
             //schedule new thread to be run
             self.t_yield();
         }
+    }
+
+    #[inline(never)]
+    fn t_yield(&mut self) {
+        let mut pos = self.current;
+
+        // go through any threads that are available and ready to run
+        while self.threads[pos].state != State::Available {
+            pos += 1;
+            if pos == self.threads.len() {
+                pos = 0;
+            }
+            if pos == self.current {
+                return false;
+            }
+        }
+
+        if self.threads[self.current].state != State::Available {
+            self.threads[self.current].state = State::Ready;
+        }
+
+        //move to next thread
+        self.threads[pos].state = State::Running;
+        let old_pos = self.current;
+        self.current = pos;
+
+        unsafe {
+            //swap threads
+            let old: *mut ThreadContext = &mut self.threads[old_pos].ctx;
+            let new: *const ThreadContext = &self.threads[pos].ctx;
+            asm!("call switch", in("rdi") old, in("rsi") new, clobber_abi("C"));
+        }
+        self.threads.len() > 0
     }
 }
 
