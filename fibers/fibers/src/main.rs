@@ -4,6 +4,7 @@
 // We don't want the OS adding prologue and epilogue between each stack.
 #![feature(naked_functions)]
 use std::arch::asm;
+use std::arch::naked_asm;
 
 // 2MB Stack size.
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
@@ -50,7 +51,7 @@ struct ThreadContext {
 impl Thread {
     fn new() -> Self {
         Thread {
-            stack: vec![0_u8: DEFAULT_STACK_SIZE], //Allocate new stack on thread creation (not most efficient)
+            stack: vec![0_u8; DEFAULT_STACK_SIZE], //Allocate new stack on thread creation (not most efficient)
             ctx: ThreadContext::default(),
             state: State::Available,
         }
@@ -61,7 +62,7 @@ impl Runtime {
     pub fn new() -> Self {
         //initialize a new base thread
         let base_thread = Thread {
-            stack: vec![0_u8: DEFAULT_STACK_SIZE],
+            stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: ThreadContext::default(),
             state: State::Running,
         };
@@ -105,7 +106,7 @@ impl Runtime {
     }
 
     #[inline(never)]
-    fn t_yield(&mut self) {
+    fn t_yield(&mut self) -> bool {
         let mut pos = self.current;
 
         // go through any threads that are available and ready to run
@@ -169,52 +170,52 @@ impl Runtime {
 
         available.state = State::Ready;
     }
+}
 
-    // called when return from f so we can call guard on 16 byte boundary
-    fn guard() {
-        unsafe {
-            let r_ptr = RUNTIME as *const Runtime;
-            (*rt_ptr).t_return();
-        }
+// called when return from f so we can call guard on 16 byte boundary
+fn guard() {
+    unsafe {
+        let rt_ptr = RUNTIME as *mut Runtime;
+        (*rt_ptr).t_return();
     }
+}
 
-    #[naked]
-    unsafe extern "C" fn skip() {
-        // ret pops off the next value from the stack and jump to whatever instructions that address points to
-        // which will be the guard. (but of course 16 byte aligned)
-        asm!("ret", options(noreturn)))
-    }
+#[naked]
+unsafe extern "C" fn skip() {
+    // ret pops off the next value from the stack and jump to whatever instructions that address points to
+    // which will be the guard. (but of course 16 byte aligned)
+    naked_asm!("ret");
+}
 
-    // lets us call yield from anywhere
-    // super unsafe do not do this at home kids.
-    pub fn yield_thread() {
-        unsafe {
-            let r_ptr = RUNTIME as *const Runtime;
-            (*r_ptr).t_yield();
-        }
+// lets us call yield from anywhere
+// super unsafe do not do this at home kids.
+pub fn yield_thread() {
+    unsafe {
+        let rt_ptr = RUNTIME as *mut Runtime;
+        (*rt_ptr).t_yield();
     }
+}
 
-    #[naked]
-    #[no_mangle]
-    unsafe extern "C" fn switch() {
-        asm!(
-            "mov [rdi + 0x00], rsp",
-            "mov [rdi + 0x08], r15",
-            "mov [rdi + 0x10], r14",
-            "mov [rdi + 0x18], r13",
-            "mov [rdi + 0x20], r12",
-            "mov [rdi + 0x28], rbx",
-            "mov [rdi + 0x30], rbp",
-            "mov rsp, [rsi + 0x00]",
-            "mov r15, [rsi + 0x08]",
-            "mov r14, [rsi + 0x10]",
-            "mov r13, [rsi + 0x18]",
-            "mov r12, [rsi + 0x20]",
-            "mov rbx, [rsi + 0x28]",
-            "mov rbp, [rsi + 0x30]",
-            "ret", options(noreturn)
-        )
-    }
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn switch() {
+    naked_asm!(
+        "mov [rdi + 0x00], rsp",
+        "mov [rdi + 0x08], r15",
+        "mov [rdi + 0x10], r14",
+        "mov [rdi + 0x18], r13",
+        "mov [rdi + 0x20], r12",
+        "mov [rdi + 0x28], rbx",
+        "mov [rdi + 0x30], rbp",
+        "mov rsp, [rsi + 0x00]",
+        "mov r15, [rsi + 0x08]",
+        "mov r14, [rsi + 0x10]",
+        "mov r13, [rsi + 0x18]",
+        "mov r12, [rsi + 0x20]",
+        "mov rbx, [rsi + 0x28]",
+        "mov rbp, [rsi + 0x30]",
+        "ret",
+    )
 }
 
 fn main() {
@@ -225,7 +226,7 @@ fn main() {
         let id = 1;
         for i in 0..10 {
             println!("thread: {} counter: {}", id, i);
-            Runtime::yield_thread();
+            yield_thread();
         }
     });
     runtime.spawn(|| {
@@ -233,7 +234,7 @@ fn main() {
         let id = 2;
         for i in 0..15 {
             println!("thread: {} counter: {}", id, i);
-            Runtime::yield_thread();
+            yield_thread();
         }
     });
     runtime.run();
